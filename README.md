@@ -1,6 +1,6 @@
 # 火山引擎多账号身份权限集中管理
 
-本工程将阿里云“资源目录 + CloudSSO + SAML/SCIM + 访问配置 + 访问授权”方案映射为火山引擎“企业组织 + 云身份中心 + 权限集 + 访问授权”，并使用 Terraform `volcenginecc` Provider 实现。
+本工程使用 Terraform `volcenginecc` Provider，实现火山引擎企业组织、云身份中心、权限集和访问授权的集中管理。
 
 ## 架构
 
@@ -18,19 +18,6 @@ flowchart LR
 仓库根目录是资源栈平台入口。平台从根目录执行 `terraform init`、`terraform plan`、`terraform apply`，在同一个 State 中按依赖顺序完成组织、账号、身份、权限集部署和授权，不依赖任何 Shell 脚本。
 
 仓库根目录是唯一部署入口，使用单 State，无跨栈依赖。
-
-## 云产品映射
-
-| 阿里云方案对象 | 火山引擎实现 |
-| --- | --- |
-| 资源目录 / 资源夹 / 成员账号 | 企业组织 / OU / `volcenginecc_organization_account` |
-| CloudSSO 目录 | 云身份中心 |
-| CloudSSO 用户与用户组 | `volcenginecc_cloudidentity_user/group` |
-| SAML 身份提供商 | 云身份中心控制台配置，Terraform 门禁确认 |
-| SCIM 同步 | 云身份中心控制台配置；同步主体以 `external_principals` 引用 |
-| 访问配置 | `volcenginecc_cloudidentity_permission_set` |
-| 访问配置部署 | `volcenginecc_cloudidentity_permission_set_provisioning` |
-| 访问授权 | `volcenginecc_cloudidentity_permission_set_assignment` |
 
 权限集部署按“权限集 + 目标账号”去重。多个组使用同一权限集访问同一账号时，只创建一个 provisioning，避免 Provider 侧重复资源冲突。
 
