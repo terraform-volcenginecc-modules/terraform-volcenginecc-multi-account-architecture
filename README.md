@@ -122,7 +122,7 @@ external_principals = {
 ## 安全边界
 
 - 资源栈删除前必须先完成成员账号内资源、账单、日志和密钥迁移，并确认 Provider 的账号退出语义；生产环境应对资源栈删除启用平台审批。
-- 密码只通过敏感环境变量 `TF_VAR_cloud_identity_user_passwords` 注入，禁止写入 tfvars。
+- 每个 `cloud_identity_users` 本地用户都必须通过敏感环境变量 `TF_VAR_cloud_identity_user_passwords` 注入非空初始密码，禁止写入 tfvars；缺失或仅包含空白字符时 Plan 会失败。
 - SAML、SCIM、财务关系当前由控制台完成，Terraform 只提供显式门禁，不伪装成已自动化。
 - 生产授权优先使用用户组，不直接授权个人；高权限权限集应使用短会话并配合 MFA。
 - `terraform.tfstate` 可能包含敏感值，必须加密存储并限制访问。

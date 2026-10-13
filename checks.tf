@@ -44,6 +44,14 @@ resource "terraform_data" "configuration_guard" {
     }
 
     precondition {
+      condition = alltrue([
+        for user in var.cloud_identity_users :
+        try(trimspace(var.cloud_identity_user_passwords[user.key]) != "", false)
+      ])
+      error_message = "cloud_identity_user_passwords 必须为每个 cloud_identity_users 用户提供非空初始密码"
+    }
+
+    precondition {
       condition     = length(var.cloud_identity_groups) == length(distinct([for group in var.cloud_identity_groups : group.key]))
       error_message = "cloud_identity_groups.key 必须唯一"
     }

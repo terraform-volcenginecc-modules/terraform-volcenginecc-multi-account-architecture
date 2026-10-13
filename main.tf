@@ -153,10 +153,12 @@ resource "volcenginecc_cloudidentity_permission_set_assignment" "this" {
     each.value.target_account_id
   )
 
-  depends_on = [time_sleep.cloud_identity_account_propagation]
+  # The service only allows deprovisioning after all assignments are removed.
+  # Provision first on create so Terraform reverses the order on destroy.
+  depends_on = [volcenginecc_cloudidentity_permission_set_provisioning.this]
 }
 
-# Provisioning synchronizes a permission set after the account assignment exists.
+# Provisioning deploys the permission set to the target account before access is assigned.
 resource "volcenginecc_cloudidentity_permission_set_provisioning" "this" {
   for_each = local.provisioning_keys
 
@@ -167,5 +169,5 @@ resource "volcenginecc_cloudidentity_permission_set_provisioning" "this" {
     trimprefix(split("|", each.value)[1], "id:")
   )
 
-  depends_on = [volcenginecc_cloudidentity_permission_set_assignment.this]
+  depends_on = [time_sleep.cloud_identity_account_propagation]
 }
