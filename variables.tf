@@ -25,144 +25,115 @@ variable "organization_units" {
   type = list(object({
     key           = string
     name          = string
-    description   = string
-    parent_ou_key = string
+    description   = optional(string, "")
+    parent_ou_key = optional(string, "")
   }))
-  description = "固定组织单元拓扑：ou_core、ou_workloads 挂根节点，ou_production 挂 ou_workloads"
+  description = "组织单元：ou_core、ou_workloads 挂根节点，ou_production 挂 ou_workloads"
   default     = []
+
+  validation {
+    condition = length(distinct([for ou in var.organization_units : ou.key])) == length(var.organization_units) && alltrue([
+      for ou in var.organization_units :
+      contains(["ou_core", "ou_workloads", "ou_production"], ou.key) &&
+      trimspace(ou.name) != "" &&
+      (ou.key == "ou_production" ? ou.parent_ou_key == "ou_workloads" : ou.parent_ou_key == "")
+      ]) && alltrue([
+      for ou in var.organization_units :
+      ou.key != "ou_production" || contains([for parent in var.organization_units : parent.key], "ou_workloads")
+    ])
+    error_message = "OU key 必须唯一；Core、Workloads 挂根节点，Production 必须挂 Workloads，名称不能为空"
+  }
 }
 
 variable "organization_accounts" {
   type = list(object({
-    mode                        = string
-    account_name                = string
-    show_name                   = string
-    description                 = string
-    org_unit_key                = string
-    allow_console               = number
-    verification_relation_id    = string
-    account_type                = string
-    existing_account_id         = string
-    financial_relation_verified = bool
-    tags = list(object({
+    account_name             = string
+    show_name                = optional(string, "")
+    description              = optional(string, "")
+    org_unit_key             = optional(string, "")
+    allow_console            = optional(number, 1)
+    verification_relation_id = optional(string, "")
+    account_type             = optional(string, "workload")
+    tags = optional(list(object({
       key   = string
       value = string
-    }))
+    })), [])
   }))
-  description = "成员账号列表；mode 支持 create 和 existing"
+  description = "创建的成员账号列表"
   default     = []
 
   validation {
-    condition = alltrue([
+    condition = length(distinct([for account in var.organization_accounts : account.account_name])) == length(var.organization_accounts) && alltrue([
       for account in var.organization_accounts :
-      contains(["create", "existing"], account.mode) &&
-      contains([1, 2], account.allow_console) &&
-      (account.mode == "create" ? account.existing_account_id == "" : account.existing_account_id != "")
+      trimspace(account.account_name) != "" &&
+      length(account.account_name) >= 5 && length(account.account_name) <= 20 &&
+      contains([1, 2], account.allow_console)
     ])
-    error_message = "账号 mode 必须为 create/existing，allow_console 必须为 1/2，且 existing_account_id 必须与模式匹配"
+    error_message = "account_name 必须为 5–20 个字符且唯一，allow_console 必须为 1 或 2"
   }
-}
-
-variable "skip_financial_relation_gate" {
-  type        = bool
-  description = "是否跳过财务关系人工确认门禁；资源栈一键部署默认跳过"
-  default     = true
-}
-
-variable "cloud_identity_account_propagation_wait" {
-  type        = string
-  description = "新成员账号同步到云身份中心后再下发权限集的等待时间"
-  default     = "180s"
-}
-
-variable "identity_source_mode" {
-  type        = string
-  description = "身份源模式：local、saml 或 saml_scim"
-  default     = "local"
-
-  validation {
-    condition     = contains(["local", "saml", "saml_scim"], var.identity_source_mode)
-    error_message = "identity_source_mode 必须是 local、saml 或 saml_scim"
-  }
-}
-
-variable "identity_provider_name" {
-  type        = string
-  description = "SAML 身份提供商名称"
-  default     = ""
-}
-
-variable "saml_configured" {
-  type        = bool
-  description = "SAML 是否已在云身份中心配置完成"
-  default     = false
-}
-
-variable "scim_configured" {
-  type        = bool
-  description = "SCIM 是否已在云身份中心配置完成"
-  default     = false
-}
-
-variable "skip_identity_source_gate" {
-  type        = bool
-  description = "是否跳过身份源人工确认门禁"
-  default     = false
 }
 
 variable "cloud_identity_users" {
   type = list(object({
     key                     = string
     user_name               = string
-    display_name            = string
-    description             = string
-    email                   = string
-    phone                   = string
-    password_reset_required = bool
+    display_name            = optional(string, "")
+    description             = optional(string, "")
+    email                   = optional(string, "")
+    phone                   = optional(string, "")
+    password_reset_required = optional(bool, true)
   }))
-  description = "Terraform 管理的云身份中心本地用户"
+  description = "云身份中心用户"
   default     = []
+
+  validation {
+    condition = length(distinct([for user in var.cloud_identity_users : user.key])) == length(var.cloud_identity_users) && alltrue([
+      for user in var.cloud_identity_users : trimspace(user.key) != "" && trimspace(user.user_name) != "" && !strcontains(user.key, "|")
+    ])
+    error_message = "用户 key 必须非空且唯一，不能包含 |；user_name 不能为空"
+  }
 }
 
 variable "cloud_identity_user_passwords" {
   type        = map(string)
-  description = "本地用户初始密码映射，key 对应 cloud_identity_users.key"
+  description = "用户初始密码映射，key 对应 cloud_identity_users.key"
   default     = {}
   sensitive   = true
+
+  validation {
+    condition = alltrue([
+      for password in values(var.cloud_identity_user_passwords) :
+      length(password) >= 8 && length(password) <= 32 &&
+      length(compact([
+        can(regex("[A-Z]", password)) ? "upper" : "",
+        can(regex("[a-z]", password)) ? "lower" : "",
+        can(regex("[0-9]", password)) ? "number" : "",
+        can(regex("[^A-Za-z0-9[:space:]]", password)) ? "special" : "",
+      ])) >= 3
+    ])
+    error_message = "用户密码必须为 8 到 32 位，并包含大写、小写、数字、特殊字符中的至少三类"
+  }
 }
 
 variable "cloud_identity_groups" {
   type = list(object({
     key          = string
     group_name   = string
-    display_name = string
-    description  = string
-    join_type    = string
-    member_keys  = list(string)
+    display_name = optional(string, "")
+    description  = optional(string, "")
+    join_type    = optional(string, "Manual")
+    member_keys  = optional(list(string), [])
   }))
-  description = "Terraform 管理的 Manual 用户组"
+  description = "云身份中心用户组及用户成员"
   default     = []
 
   validation {
-    condition     = alltrue([for group in var.cloud_identity_groups : group.join_type == "Manual"])
-    error_message = "Terraform 管理的用户组必须使用 Manual；SCIM 同步组请通过 external_principals 引用"
-  }
-}
-
-variable "external_principals" {
-  type = map(object({
-    principal_type = string
-    principal_id   = string
-  }))
-  description = "SCIM 或外部流程维护的云身份中心用户/组"
-  default     = {}
-
-  validation {
-    condition = alltrue([
-      for principal in values(var.external_principals) :
-      contains(["User", "Group"], principal.principal_type) && principal.principal_id != ""
+    condition = length(distinct([for group in var.cloud_identity_groups : group.key])) == length(var.cloud_identity_groups) && alltrue([
+      for group in var.cloud_identity_groups :
+      trimspace(group.key) != "" && !strcontains(group.key, "|") && trimspace(group.group_name) != "" &&
+      group.join_type == "Manual" && length(distinct(group.member_keys)) == length(group.member_keys)
     ])
-    error_message = "external_principals 的 principal_type 必须为 User/Group，且 principal_id 不能为空"
+    error_message = "用户组 key 必须非空且唯一，不能包含 |；group_name 不能为空，join_type 必须为 Manual，成员 key 不得重复"
   }
 }
 
@@ -170,17 +141,32 @@ variable "permission_sets" {
   type = list(object({
     key              = string
     name             = string
-    description      = string
-    session_duration = number
-    relay_state      = string
+    description      = optional(string, "")
+    session_duration = optional(number, 3600)
+    relay_state      = optional(string, "")
     permission_policies = list(object({
-      permission_policy_name     = string
+      permission_policy_name     = optional(string, "")
       permission_policy_type     = string
-      permission_policy_document = string
+      permission_policy_document = optional(string, "")
     }))
   }))
-  description = "云身份中心权限集"
+  description = "云身份中心权限集及策略"
   default     = []
+
+  validation {
+    condition = length(distinct([for permission_set in var.permission_sets : permission_set.key])) == length(var.permission_sets) && alltrue([
+      for permission_set in var.permission_sets :
+      trimspace(permission_set.key) != "" && !strcontains(permission_set.key, "|") && trimspace(permission_set.name) != "" &&
+      permission_set.session_duration >= 3600 && permission_set.session_duration <= 43200 &&
+      permission_set.session_duration == floor(permission_set.session_duration)
+    ])
+    error_message = "权限集 key 必须非空且唯一，不能包含 |；name 不能为空，session_duration 必须为 3600 到 43200 的整数"
+  }
+
+  validation {
+    condition     = length(distinct([for permission_set in var.permission_sets : permission_set.name])) == length(var.permission_sets)
+    error_message = "permission_sets.name 必须唯一，不同 key 也不能使用相同的权限集名称"
+  }
 
   validation {
     condition = alltrue(flatten([
@@ -204,17 +190,20 @@ variable "permission_set_assignments" {
     principal_type     = string
     principal_key      = string
     target_account_key = string
-    target_account_id  = string
   }))
-  description = "权限集访问授权；目标账号逻辑 key 与直接账号 ID 二选一"
+  description = "权限集访问授权；引用本模板创建的用户或用户组及成员账号"
   default     = []
 
   validation {
     condition = alltrue([
       for assignment in var.permission_set_assignments :
       contains(["User", "Group"], assignment.principal_type) &&
-      ((assignment.target_account_key != "") != (assignment.target_account_id != ""))
-    ])
-    error_message = "principal_type 必须为 User/Group，且 target_account_key 与 target_account_id 必须恰好填写一个"
+      trimspace(assignment.permission_set_key) != "" && trimspace(assignment.principal_key) != "" &&
+      trimspace(assignment.target_account_key) != ""
+      ]) && length(distinct([
+        for assignment in var.permission_set_assignments :
+        "${assignment.permission_set_key}|${assignment.principal_type}|${assignment.principal_key}|${assignment.target_account_key}"
+    ])) == length(var.permission_set_assignments)
+    error_message = "授权必须填写权限集、主体、目标账号；principal_type 必须为 User/Group，且三元组不得重复"
   }
 }

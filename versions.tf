@@ -4,11 +4,11 @@ terraform {
   required_providers {
     volcenginecc = {
       source  = "volcengine/volcenginecc"
-      version = "~> 0.0.70"
+      version = "= 0.0.70"
     }
     time = {
       source  = "hashicorp/time"
-      version = "~> 0.13"
+      version = "= 0.14.2"
     }
   }
 }

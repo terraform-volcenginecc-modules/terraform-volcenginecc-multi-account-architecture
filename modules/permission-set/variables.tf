@@ -11,12 +11,12 @@ variable "description" {
 
 variable "session_duration" {
   type        = number
-  description = "会话有效期（秒），范围 900 - 43200"
+  description = "会话有效期（秒），范围 3600 - 43200"
   default     = 3600
 
   validation {
-    condition     = var.session_duration >= 900 && var.session_duration <= 43200
-    error_message = "session_duration 必须在 900 到 43200 秒之间"
+    condition     = var.session_duration >= 3600 && var.session_duration <= 43200 && floor(var.session_duration) == var.session_duration
+    error_message = "session_duration 必须为 3600 到 43200 之间的整数秒"
   }
 }
 

@@ -1,32 +1,21 @@
 output "organization_unit_ids" {
   description = "组织单元 ID 映射"
-  value       = local.organization_unit_ids
+  value       = module.organization.organization_unit_ids
 }
 
 output "organization_account_ids" {
   description = "成员账号 ID 映射"
-  value       = local.organization_account_ids
-}
-
-output "identity_source_status" {
-  description = "身份源配置状态"
-  value = {
-    mode                   = module.identity_source.identity_source_mode
-    identity_provider_name = module.identity_source.identity_provider_name
-    saml_configured        = module.identity_source.saml_configured
-    scim_configured        = module.identity_source.scim_configured
-    gate_passed            = module.identity_source.gate_passed
-  }
+  value       = module.organization.organization_account_ids
 }
 
 output "cloud_identity_user_ids" {
   description = "云身份中心用户 ID 映射"
-  value       = { for key, user in module.cloud_identity_users : key => user.user_id }
+  value       = module.identity.user_ids
 }
 
 output "cloud_identity_group_ids" {
   description = "云身份中心用户组 ID 映射"
-  value       = { for key, group in module.cloud_identity_groups : key => group.group_id }
+  value       = module.identity.group_ids
 }
 
 output "permission_set_ids" {
@@ -36,16 +25,10 @@ output "permission_set_ids" {
 
 output "permission_set_assignment_ids" {
   description = "访问授权 ID 映射"
-  value = {
-    for key, assignment in volcenginecc_cloudidentity_permission_set_assignment.this :
-    key => assignment.id
-  }
+  value       = module.access.assignment_ids
 }
 
 output "permission_set_provisioning_status" {
-  description = "权限集目标账号部署状态"
-  value = {
-    for key, provisioning in volcenginecc_cloudidentity_permission_set_provisioning.this :
-    key => provisioning.provisioning_status
-  }
+  description = "访问授权完成后的权限集同步状态"
+  value       = module.access.provisioning_status
 }
