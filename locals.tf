@@ -4,6 +4,10 @@ locals {
     { key = "Environment", value = var.environment },
     { key = "ManagedBy", value = "terraform" },
   ]
+  all_organization_account_ids = merge(
+    module.organization.organization_account_ids,
+    var.existing_organization_account_ids,
+  )
   permission_sets_by_key = { for ps in var.permission_sets : ps.key => ps }
   assignments = { for assignment in var.permission_set_assignments :
     "${assignment.permission_set_key}|${assignment.principal_type}|${assignment.principal_key}|${assignment.target_account_key}" => assignment

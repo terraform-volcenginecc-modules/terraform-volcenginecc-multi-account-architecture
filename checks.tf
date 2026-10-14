@@ -11,6 +11,16 @@ check "account_ou_references" {
   }
 }
 
+check "account_key_conflicts" {
+  assert {
+    condition = length(setintersection(
+      toset([for account in var.organization_accounts : account.account_name]),
+      toset(keys(var.existing_organization_account_ids)),
+    )) == 0
+    error_message = "新建账号与已有账号不能使用相同的 account_name"
+  }
+}
+
 check "user_passwords_complete" {
   assert {
     condition = alltrue([
@@ -36,7 +46,10 @@ check "assignment_references" {
     condition = alltrue([
       for assignment in var.permission_set_assignments :
       contains([for permission_set in var.permission_sets : permission_set.key], assignment.permission_set_key) &&
-      contains([for account in var.organization_accounts : account.account_name], assignment.target_account_key) &&
+      contains(concat(
+        [for account in var.organization_accounts : account.account_name],
+        keys(var.existing_organization_account_ids),
+      ), assignment.target_account_key) &&
       (
         assignment.principal_type == "User"
         ? contains([for user in var.cloud_identity_users : user.key], assignment.principal_key)

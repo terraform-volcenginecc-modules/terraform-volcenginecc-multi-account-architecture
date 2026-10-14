@@ -1,10 +1,11 @@
 # Root orchestration for the seven cloud resource types.
 module "organization" {
-  source                = "./modules/organization"
-  root_parent_id        = var.root_parent_id
-  organization_units    = var.organization_units
-  organization_accounts = var.organization_accounts
-  common_tags           = local.common_tags
+  source                 = "./modules/organization"
+  root_parent_id         = var.root_parent_id
+  organization_units     = var.organization_units
+  organization_accounts  = var.organization_accounts
+  existing_account_names = toset(keys(var.existing_organization_account_ids))
+  common_tags            = local.common_tags
 }
 
 module "identity" {
@@ -28,7 +29,7 @@ module "access" {
   source               = "./modules/access"
   assignments          = local.assignments
   provisioning_targets = local.provisioning_targets
-  account_ids          = module.organization.organization_account_ids
+  account_ids          = local.all_organization_account_ids
   principal_ids        = module.identity.principal_ids
   permission_set_ids   = { for key, ps in module.permission_sets : key => ps.permission_set_id }
 }

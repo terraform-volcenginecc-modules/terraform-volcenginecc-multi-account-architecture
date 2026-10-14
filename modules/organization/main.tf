@@ -46,6 +46,11 @@ resource "volcenginecc_organization_account" "this" {
 
   lifecycle {
     precondition {
+      condition     = !contains(var.existing_account_names, each.value.account_name)
+      error_message = "新建账号 ${each.value.account_name} 与已有账号同名，请修改 organization_accounts 或 existing_organization_account_ids"
+    }
+
+    precondition {
       condition     = each.value.org_unit_key == "" || contains(keys(local.ou_map), each.value.org_unit_key)
       error_message = "账号 org_unit_key 必须引用已声明 OU；空值表示组织根节点"
     }

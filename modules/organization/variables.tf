@@ -49,14 +49,20 @@ variable "organization_accounts" {
   default     = []
 
   validation {
-    condition = alltrue([
+    condition = length(distinct([for account in var.organization_accounts : account.account_name])) == length(var.organization_accounts) && alltrue([
       for account in var.organization_accounts :
       contains([1, 2], account.allow_console) &&
       trimspace(account.account_name) != "" &&
       length(account.account_name) >= 5 && length(account.account_name) <= 20
     ])
-    error_message = "allow_console 必须为 1/2，account_name 必须为 5–20 个字符"
+    error_message = "account_name 必须为 5–20 个字符且唯一，allow_console 必须为 1/2"
   }
+}
+
+variable "existing_account_names" {
+  type        = set(string)
+  description = "已有账号名称，用于阻断新建账号与已有账号同名"
+  default     = []
 }
 
 variable "common_tags" {

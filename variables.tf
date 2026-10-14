@@ -73,6 +73,27 @@ variable "organization_accounts" {
   }
 }
 
+variable "existing_organization_account_ids" {
+  type        = map(string)
+  description = "已有成员账号 ID 映射；key 为 account_name，仅用于权限授权，不管理账号、OU、标签或生命周期"
+  default     = {}
+
+  validation {
+    condition = (
+      length(distinct(values(var.existing_organization_account_ids))) == length(var.existing_organization_account_ids) &&
+      alltrue([
+        for account_name, account_id in var.existing_organization_account_ids :
+        trimspace(account_name) != "" &&
+        length(account_name) >= 5 &&
+        length(account_name) <= 20 &&
+        !strcontains(account_name, "|") &&
+        can(regex("^[0-9]+$", account_id))
+      ])
+    )
+    error_message = "已有账号名称必须为 5–20 个字符且不能包含 |；账号 ID 必须为唯一的数字字符串"
+  }
+}
+
 variable "cloud_identity_users" {
   type = list(object({
     key                     = string
@@ -191,7 +212,7 @@ variable "permission_set_assignments" {
     principal_key      = string
     target_account_key = string
   }))
-  description = "权限集访问授权；引用本模板创建的用户或用户组及成员账号"
+  description = "权限集访问授权；主体引用本模板创建的用户或用户组，目标账号可为新建账号或 existing_organization_account_ids"
   default     = []
 
   validation {

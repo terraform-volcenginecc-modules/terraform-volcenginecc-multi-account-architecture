@@ -2,48 +2,99 @@
 
 [English](README.md) | 简体中文
 
-根目录是唯一 Terraform 入口。一次 Apply、一个 State，通过四个模块创建组织、身份、权限集和访问授权。
+本模板面向企业多账号身份与权限集中管理，通过四个模块统一配置组织单元、成员账号、云身份中心用户及用户组、权限集和访问授权。根目录是唯一 Terraform 入口，使用一个 State 管理本模板创建的资源，并支持将已有成员账号作为授权目标。
 
 ## 1. 业务背景
 
-用户加入用户组，权限集定义策略。访问授权决定哪个用户或用户组可以使用哪个权限集访问哪个账号；授权完成后，权限集同步将策略部署到目标账号。
+- 按运维、安全、日志、生产和预发场景组织成员账号，便于明确账号职责与组织层级。
+- 在云身份中心集中管理员工及用户组，减少逐账号维护身份和权限的工作。
+- 通过管理员、只读等权限集控制账号访问，支持同时为新建账号和已有成员账号授权。
 
 ## 2. 方案概述
 
-`organization` 创建 OU 和账号；`identity` 创建用户和用户组；`permission-set` 定义权限；`access` 在账号创建完成后等待 180 秒，先创建访问授权，再同步权限集。
+`organization` 创建 OU 和新账号；`identity` 创建用户和用户组；`permission-set` 定义权限；`access` 合并新建账号输出与已有账号 ID，在账号创建完成后等待 180 秒，先创建访问授权，再同步权限集。已有账号仅参与授权，不管理其 OU、标签和生命周期。
 
 ~~~mermaid
 flowchart LR
-  OU["组织单元 OU"] --> ACCOUNT["组织账号"]
-  USER["云身份用户"] --> GROUP["云身份用户组"]
-  PS["权限集"] --> ASSIGN["访问授权"] --> PROVISION["权限集同步"]
-  ACCOUNT --> WAIT["等待 180 秒"] --> ASSIGN
-  GROUP --> ASSIGN
+    classDef main fill:#EAF4FF,stroke:#5B8FF9,color:#0D47A1;
+    classDef tcc fill:#DFF2FF,stroke:#409EFF,color:#0D47A1;
+    classDef note fill:#FFFDE7,stroke:#FBC02D,color:#5D4037;
+
+    Vars[/"terraform.tfvars<br/>OU / 新旧账号 / 用户 / 组<br/>权限集 / 授权声明"/]:::tcc
+    EXISTING[/"existing_organization_account_ids<br/>已加入组织的成员账号 ID<br/>仅引用，不创建账号"/]:::tcc
+
+    subgraph Org["组织层 Organization"]
+        direction TB
+        OU["organization_unit<br/>组织单元 OU"]:::main
+        ACC["organization_account<br/>新建成员账号"]:::main
+        OU --> ACC
+    end
+
+    subgraph Identity["身份层 Cloud Identity"]
+        direction TB
+        USER["cloudidentity_user<br/>云身份用户"]:::main
+        GRP["cloudidentity_group<br/>云身份用户组"]:::main
+        PS["cloudidentity_permission_set<br/>访问权限集"]:::main
+        USER -.->|成员关系| GRP
+    end
+
+    subgraph Assign["授权层 Assignment"]
+        direction TB
+        WAIT["time_sleep<br/>账号 ID 就绪后等待 180 秒"]:::tcc
+        ASN["permission_set_assignment<br/>访问授权"]:::main
+        PROV["permission_set_provisioning<br/>权限集部署"]:::main
+        WAIT --> ASN --> PROV
+    end
+
+    Vars --> Org
+    Vars --> Identity
+    Vars --> Assign
+    Vars --> EXISTING
+    GRP --> ASN
+    USER --> ASN
+    PS --> ASN
+    ACC --> WAIT
+    EXISTING --> WAIT
+
+    NoteOU["OU 要点<br/>- Core、Workloads 挂在 root_parent_id<br/>- Production 挂在 Workloads<br/>- 当前模板固定上述拓扑"]:::note
+    NoteACC["成员账号要点<br/>- 新建列表名称唯一，不与已有账号 key 同名<br/>- verification_relation_id 空值转 null 省略<br/>- 合并 common_tags 与 AccountType 标签"]:::note
+    NotePS["权限集要点<br/>- 支持 System + Inline 混合策略<br/>- session_duration 3600–43200 秒"]:::note
+    NoteASN["授权要点<br/>- principal: User 或 Group<br/>- depends_on 保证先授权、再部署权限集<br/>- 按权限集与目标账号组合去重部署"]:::note
+
+    OU -.-> NoteOU
+    ACC -.-> NoteACC
+    PS -.-> NotePS
+    PROV -.-> NoteASN
 ~~~
 
 Core 和 Workloads 挂在企业组织根节点下，Production 挂在 Workloads 下。通过资源引用建立执行依赖。
 
 首次访问授权建立账号、主体和权限集关系，随后显式同步权限集。修改策略后，应在云身份中心检查目标账号同步状态，需要时重新执行同步。
 
+**部署必须将执行并发设置为 1。** 成员账号创建不支持并发数大于 1；模板中的账号列表不会自动保证逐个创建。云上资源栈和本地执行都必须遵守此限制，具体设置见第 4 章。
+
+**本模板不支持通过 `terraform destroy` 完整删除资源。** 子账号删除或注销需要在控制台完成身份验证等人机交互，Terraform 无法代替该过程。清理流程见 [销毁资源](#425-销毁资源)。
+
 ## 3. IaC 设计
 
 ### 3.1 资源清单
 
-当前 `terraform.tfvars` 配置七种云资源，共 18 个云资源实例：
+按当前 `terraform.tfvars` 示例补齐参数后，预计创建七种云资源、共 22 个云资源实例，并引用 5 个已有成员账号。资源数量随账号、身份及授权配置变化，示例数量如下：
 
-| Terraform 资源 | 数量 | 用途 |
-| --- | --- | --- |
-| `volcenginecc_organization_unit` | 3 | Core、Workloads、Production |
-| `volcenginecc_organization_account` | 5 | 运维、安全、日志、生产、预发账号 |
-| `volcenginecc_cloudidentity_user` | 2 | 平台管理员和审计员 |
-| `volcenginecc_cloudidentity_group` | 2 | 管理员组和审计组，包含成员关系 |
-| `volcenginecc_cloudidentity_permission_set` | 2 | 管理员和只读权限 |
-| `volcenginecc_cloudidentity_permission_set_assignment` | 2 | 授权用户组访问指定账号 |
-| `volcenginecc_cloudidentity_permission_set_provisioning` | 2 | 授权完成后向目标账号同步权限集 |
+| Terraform 资源 | 用途 |
+| --- | --- |
+| `volcenginecc_organization_unit` × 3 | Core、Workloads、Production 组织单元 |
+| `volcenginecc_organization_account` × 5 | 新建运维、安全、日志、生产、预发账号 |
+| `volcenginecc_cloudidentity_user` × 2 | 平台管理员和审计员 |
+| `volcenginecc_cloudidentity_group` × 2 | 管理员组和审计组，包含成员关系 |
+| `volcenginecc_cloudidentity_permission_set` × 2 | 管理员和只读权限 |
+| `volcenginecc_cloudidentity_permission_set_assignment` × 4 | 授权用户组访问新建或已有账号 |
+| `volcenginecc_cloudidentity_permission_set_provisioning` × 4 | 授权完成后向目标账号同步权限集 |
+| `time_sleep` × 1 | 有访问授权时等待 180 秒，无访问授权时不创建；不创建云资源 |
 
-另有 1 个 `time_sleep` 等待辅助资源，当前全新部署合计为 19 个受管资源。等待是固定缓冲，不代表账号同步就绪检测。
+示例合计 23 个受管实例。已有账号仅被引用，不计入受管账号资源；模板不管理其账号、OU、标签或生命周期。等待是固定缓冲，不代表账号同步就绪检测。访问授权数量由 `permission_set_assignments` 决定，权限集同步数量由其中不同的“权限集＋目标账号”组合决定。
 
-授权实例键来自“权限集＋主体类型＋主体＋账号”；权限集同步按“权限集＋账号”去重。Apply 才生成的账号 ID 作为资源参数。
+授权实例键来自“权限集＋主体类型＋主体＋账号”；权限集同步按“权限集＋账号”去重。新建账号 ID 来自 organization 模块输出，已有账号 ID 来自 `existing_organization_account_ids`，合并后提供给 access 模块。
 
 ### 3.2 工程结构
 
@@ -64,6 +115,8 @@ Core 和 Workloads 挂在企业组织根节点下，Production 挂在 Workloads 
 
 `variables.tf` 校验字段格式、唯一性和取值范围；`checks.tf` 集中诊断账号 OU、用户密码、组成员及授权的跨输入引用。Terraform 的 `check` 失败只产生警告，强制阻断由变量校验及对应真实云资源的 `lifecycle.precondition` 执行，不增加辅助资源。
 
+新建账号列表内的 `account_name` 不允许重复，也不能与 `existing_organization_account_ids` 的账号名称相同；冲突会在 Plan 阶段报错并阻断执行。
+
 ### 3.3 核心代码示例
 
 ~~~hcl
@@ -71,7 +124,7 @@ permission_set_assignments = [{
   permission_set_key = "ps_readonly"
   principal_type     = "Group"
   principal_key      = "grp_security_audit"
-  target_account_key = "sjhTest04"
+  target_account_key = "existing-production"
 }]
 ~~~
 
@@ -83,17 +136,21 @@ permission_set_assignments = [{
 
 ### 4.1 云上部署
 
+InfraManager 是火山引擎提供的 Terraform 托管工作台，更多产品介绍参见 [InfraManager 产品介绍](https://docs.volcengine.com/docs/infrastructure-management/product-introduction?lang=zh)。
+
 #### 4.1.1 准备权限
 
-使用组织管理员账号下有权限的身份，开通企业组织和云身份中心，并授予 CloudControl 权限及对应资源的操作权限。
+使用组织管理员账号下有权限的身份，先在控制台开通企业组织和云身份中心，取得企业组织根 OU ID。执行身份需要 CloudControl 的资源操作权限，以及企业组织 OU、成员账号、云身份中心用户、用户组、权限集、访问授权和权限集同步的相应操作权限。使用 IAM 身份或委托角色执行，按实际资源范围授予权限。
 
 #### 4.1.2 选择模板
 
-上传至 [InfraManager 控制台](https://console.volcengine.com/iac)，入口使用仓库根目录。Terraform 最低为 1.5，`volcenginecc` 固定为 0.0.70。当前尚未验证目标 InfraManager 引擎的实际部署。
+将本工程作为自定义模板上传至 [InfraManager 控制台](https://console.volcengine.com/iac)，入口使用仓库根目录，包含根目录 Terraform 文件、`terraform.tfvars`、`.terraform.lock.hcl` 和完整 `modules/` 目录。选择 Terraform 1.5.7；本模板锁定 `volcenginecc` 0.0.70 和 `time` 0.14.2，运行环境须支持这两个 Provider。
 
 #### 4.1.3 创建资源栈
 
-仅使用 `terraform.tfvars`。将根 OU ID 和账号名称占位值替换为实际值，通过敏感运行参数提供密码。
+创建资源栈时，先填写模板参数，再将**执行并发设置为 1**。通过接口创建时，对应执行参数为 `Parallelism = 1`，不得使用默认并发；参见 [创建资源栈执行参数](https://docs.volcengine.com/docs/infrastructure-management/CreateStack-Createaresourcestack?lang=zh)。该设置是运行参数，不是 `terraform.tfvars` 中的业务变量。若当前运行入口无法设置并发为 1，先确认平台运行设置，或使用下方本地部署方式。
+
+`terraform.tfvars` 是交付示例，`variables.tf` 定义参数类型、默认值和校验。部署前必须填写当前为空的 `root_parent_id`、已有账号 ID 及用户初始密码，并将示例名称、邮箱等替换为客户实际配置。已有账号必须已经加入当前企业组织，账号 ID 必须为互不重复的数字字符串。密码通过平台敏感运行参数提供，覆盖示例中的空值，不写入交付包。
 
 | 参数 | 用途 |
 | --- | --- |
@@ -103,6 +160,7 @@ permission_set_assignments = [{
 | `root_parent_id` | 企业组织真实根 OU ID |
 | `organization_units` | OU 定义 |
 | `organization_accounts` | 新建账号定义及所属 OU |
+| `existing_organization_account_ids` | 已有账号名称到账号 ID 的映射，仅用于权限授权 |
 | `cloud_identity_users` | 用户定义 |
 | `cloud_identity_user_passwords` | 按用户 key 索引的敏感初始密码 |
 | `cloud_identity_groups` | 用户组定义及成员用户 key |
@@ -111,7 +169,13 @@ permission_set_assignments = [{
 
 密码须为 8–32 字符，包含大写、小写、数字、特殊字符至少三类。不要提交密码。敏感标记只隐藏显示，不会加密 State。
 
+只新建账号时，将 `existing_organization_account_ids` 设为 `{}`，并移除对应已有账号的授权条目；只复用已有账号时，将 `organization_accounts` 设为 `[]`，不需要新建 OU 时同时将 `organization_units` 设为 `[]`。新旧混合时填写两组账号参数，并由 `target_account_key` 选择授权目标。以上是首次部署场景；已有部署中删除列表项会产生资源删除计划，应先检查变更，不能借此绕过账号人工删除要求。
+
+创建并检查执行计划，确认资源范围及授权目标符合预期，再执行部署。模板本身没有自动强制并发为 1，也没有自动禁止资源销毁，执行人员必须遵守这些运行要求。
+
 #### 4.1.4 部署验证
+
+在资源栈详情页确认部署状态为成功，查看资源清单及以下输出。验证使用资源栈输出中的实际 ID，不需要本地 Terraform State。
 
 | 输出 | 用途 |
 | --- | --- |
@@ -123,37 +187,84 @@ permission_set_assignments = [{
 | `permission_set_assignment_ids` | 授权 ID |
 | `permission_set_provisioning_status` | 授权完成后的权限集同步状态 |
 
-在控制台核对授权任务、权限集同步状态、资源关系和组成员，再使用实际员工登录验证目标账号与权限。
+| 检查内容 | 查看入口与操作 | 预期结果与异常排查 |
+| --- | --- | --- |
+| OU 和账号归属 | 在企业组织控制台按输出 ID 查看 OU、成员账号 | Core 和 Workloads 挂根节点，Production 挂 Workloads；新建账号位于指定 OU。异常先检查根 OU ID 和 `org_unit_key` |
+| 用户及组成员 | 在云身份中心查看用户、用户组和成员列表 | 管理员组包含平台管理员，审计组包含审计员；异常检查用户 key、组成员 key 及密码输入 |
+| 权限和同步 | 在云身份中心查看权限集策略、账号访问授权及同步任务 | 管理员权限集包含 `AdministratorAccess`，只读权限集包含 `ReadOnlyAccess`；目标账号正确，授权和同步任务已成功。异常检查账号是否已加入组织、执行权限及失败任务原因 |
+| 员工登录效果 | 由两类用户分别通过客户的云身份中心用户门户登录，选择授权账号和权限集 | 示例管理员可访问运维新账号及已有运维账号，审计员可访问生产新账号及已有生产账号；未授予的账号不应由本模板开放访问。异常检查其他额外授权、组成员和同步状态，并使用独立会话重新登录 |
+
+资源创建成功和输出非空不能代替员工登录及权限效果验证。完成资源核对后，还应根据客户所需业务操作确认管理员权限及只读权限边界；修改策略后重新检查同步状态。云上清理也应遵循 [人工清理流程](#425-销毁资源)，不要通过整栈销毁替代子账号控制台交互删除。
 
 ### 4.2 本地部署
 
+您也可以下载本工程模板在本地运行，需要按照下述步骤操作。
+
 #### 4.2.1 环境准备
 
-安装 Terraform >=1.5，通过运行环境提供 `VOLCENGINE_ACCESS_KEY` 和 `VOLCENGINE_SECRET_KEY`。以 JSON 映射设置敏感变量 `TF_VAR_cloud_identity_user_passwords`。不要在 tfvars 中填写空密码映射，否则会覆盖环境变量。
+安装 Terraform 1.5.7，确认可以下载锁定的 Provider，并完成与云上部署相同的服务开通、根 OU ID 和权限准备。部署前检查成员账号配额和已有账号的组织归属。通过运行环境提供凭证，不把实际 AK/SK 写入 Terraform 文件或交付包：
+
+~~~bash
+export VOLCENGINE_ACCESS_KEY="<YOUR_ACCESS_KEY>"
+export VOLCENGINE_SECRET_KEY="<YOUR_SECRET_KEY>"
+~~~
+
+将示例中的根 OU ID、已有账号 ID、资源名称和邮箱替换为客户实际值，参数说明见 [创建资源栈](#413-创建资源栈)。不要保留空账号 ID 后直接部署。
+
+用户初始密码通过 `TF_VAR_cloud_identity_user_passwords` JSON 映射提供。先删除或注释 `terraform.tfvars` 中的整个 `cloud_identity_user_passwords` 赋值块，否则示例中的空值会覆盖环境变量。然后在运行环境中设置实际密码：
+
+~~~bash
+export TF_VAR_cloud_identity_user_passwords='{"platform_admin":"<ADMIN_INITIAL_PASSWORD>","auditor":"<AUDITOR_INITIAL_PASSWORD>"}'
+~~~
+
+将占位值替换为符合密码规则的实际密码，不将密码写回交付示例或提交到仓库。State 也可能包含密码，应限制访问并安全保存。
 
 #### 4.2.2 场景化部署示例
 
-修改现有 `terraform.tfvars` 后运行：
+选择新建、已有或混合账号场景，按 [创建资源栈](#413-创建资源栈) 中的规则调整参数后运行。**账号创建不支持并发数大于 1，因此 Plan 和 Apply 都必须显式使用 `-parallelism=1`。** 即使已有账号场景没有账号创建，也保持相同执行方式，避免后续新增账号时遗漏限制。
 
 ~~~bash
 terraform init
+terraform fmt -check -recursive
 terraform validate
-terraform plan
-terraform apply
+terraform plan -parallelism=1
+terraform apply -parallelism=1
 ~~~
+
+先审核 Plan，确认不包含非预期删除或账号替换，再执行 Apply。并发为 1 只限制同时执行的操作数量，不保证账号按列表顺序创建。
 
 #### 4.2.3 部署预期结果
 
-当前输入创建 18 个云资源及 1 个等待资源，共 19 个受管实例。所有账号创建完成并返回 ID 后等待 180 秒；等待、权限集和用户组创建完成后执行访问授权，全部授权完成后再按“权限集＋账号”去重同步。再次 Plan 应无非预期变更。
+按当前示例补齐参数后，预计创建 22 个云资源及 1 个等待资源，共 23 个受管实例，并引用 5 个已有账号。新账号创建完成并返回 ID 后等待 180 秒，再对配置中的新建和已有目标账号执行访问授权，并按“权限集＋账号”去重同步。仅部分已有账号配置了授权，填写已有账号 ID 本身不会授予权限。
+
+通过以下命令查看输出，输出名称和用途见 [云上部署验证](#414-部署验证) 的输出表：
+
+~~~bash
+terraform output
+~~~
+
+使用相同入参再次执行 `terraform plan -parallelism=1`，预期没有非预期变更；若出现删除或替换，先核对参数及控制台资源，不直接执行 Apply。
 
 #### 4.2.4 部署后验证
 
-通过 `terraform output` 获取资源、授权 ID 和权限集同步状态，核对控制台关系及员工登录效果。修改策略后重新确认同步状态。
+先执行 `terraform output` 获取本地部署的实际资源、账号和授权 ID，再逐项完成 [云上部署验证](#414-部署验证) 中的控制台关系、组成员、权限同步及员工门户登录检查。门户访问应使用对应员工身份，而不是部署管理员身份；平台管理员与审计员使用独立会话，避免账号切换影响验证结果。发现同步失败时先处理失败任务；修改策略后重新检查并按需同步，不能仅以 Apply 成功认定目标账号权限已更新。
 
 #### 4.2.5 销毁资源
 
-执行 `terraform destroy` 前检查 `terraform plan -destroy` 和账号删除前置条件。操作失败后检查残留资源；Terraform 不自动回滚已完成的变更。
+**不要执行 `terraform destroy` 或通过 InfraManager 触发本模板的整栈资源销毁。** 本模板创建的子账号需要在控制台完成安全手机、身份验证等人机交互后删除或注销，Terraform 无法自动完成该流程。将成员账号移出企业组织也不等于注销账号，不能以账号从组织列表消失作为彻底删除的依据。
+
+需要清理时，在客户授权范围内按以下顺序人工处理：
+
+1. 核对模板输出和实际资源，确认仅清理本模板创建且不再使用的资源。已有账号不在账号删除范围内；先处理业务数据、云资源和账务前置条件。
+2. 在云身份中心撤销本模板创建的账号访问授权，按控制台提示处理权限集同步关系。确认无其他业务使用后，再清理本模板创建的权限集、用户组和用户。
+3. 在企业组织成员管理中定位本模板创建的子账号，按需设置安全手机、启用登录并完成验证。参见 [设置账号安全手机](https://docs.volcengine.com/docs/EnterpriseOrganization/Setaccountsecurityphone?lang=zh)。
+4. 使用待删除账号的有权身份进入账号管理的安全设置页面，按 [账号注销流程](https://docs.volcengine.com/docs/account_related/Accountcancellation?lang=zh) 完成身份验证、资源及账务检查和注销确认，以控制台显示的最终账号状态为准。
+5. 子账号及其相关关系处理完成后，确认本模板创建的 OU 已无成员和下级 OU，再从下到上删除不再使用的 OU；不要删除客户已有账号或企业组织根节点。
+
+人工清理会使云端资源与 Terraform State、资源栈记录产生差异。保留清理结果，由运维人员核对后处理管理记录；不要直接再次执行 Apply，以免重新创建已清理资源。模板代码本身没有设置自动禁止销毁的保护，此限制必须作为运行规范执行。
 
 ## 5. 总结
 
-四个模块直接管理七种云资源，共 18 个实例，另有 1 个账号同步等待资源。本次最终改造未执行 Terraform 测试、真实 Apply、员工登录或 Destroy 验收，验证由用户随后执行。
+本模板通过统一的组织、身份、权限集和访问授权配置，支持新建与已有成员账号的集中权限管理。客户可按业务规模调整账号、用户组和授权关系，并在部署后验证员工访问及权限边界。
+
+使用时必须固定执行并发为 1；子账号清理必须走控制台人机交互流程，不支持 `terraform destroy` 完整销毁。本说明给出了基于当前代码的操作步骤和预期结果，不将历史部署或测试记录作为当前版本已实测通过的结论。

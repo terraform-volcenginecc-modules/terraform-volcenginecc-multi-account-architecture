@@ -4,8 +4,8 @@ output "organization_unit_ids" {
 }
 
 output "organization_account_ids" {
-  description = "成员账号 ID 映射"
-  value       = module.organization.organization_account_ids
+  description = "新建与已有成员账号的统一 ID 映射"
+  value       = local.all_organization_account_ids
 }
 
 output "cloud_identity_user_ids" {
