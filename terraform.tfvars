@@ -1,26 +1,26 @@
-# 示例配置：创建 5 个新账号，并复用 5 个已有账号做权限授权。
-# 已有账号只通过 ID 引用，不管理其 OU、标签或生命周期。所有空值必须在部署前填写。
+# T20261014C 混合部署：创建 5 个新账号，并复用 1 个已有账号做权限授权。
+# 已有账号只通过 ID 引用，不管理其 OU、标签或生命周期。密码必须在部署前填写。
 region         = "cn-beijing"
-project        = "example-multi-account"
-environment    = "example"
-root_parent_id = ""
+project        = "default"
+environment    = "prod"
+root_parent_id = "7696086135349100582"
 
 organization_units = [
   {
     key           = "ou_core"
-    name          = "Example-Core"
+    name          = "Core-T20261014C"
     description   = "运维、安全、日志等核心账号"
     parent_ou_key = ""
   },
   {
     key           = "ou_workloads"
-    name          = "Example-Workloads"
+    name          = "Workloads-T20261014C"
     description   = "业务负载账号"
     parent_ou_key = ""
   },
   {
     key           = "ou_production"
-    name          = "Example-Production"
+    name          = "Production-T20261014C"
     description   = "生产环境"
     parent_ou_key = "ou_workloads"
   },
@@ -28,91 +28,87 @@ organization_units = [
 
 organization_accounts = [
   {
-    account_name             = "example-operation"
-    show_name                = "example-operation"
+    account_name             = "ci-t20261014c-ops"
+    show_name                = "ci-t20261014c-ops"
     description              = "运维管理账号"
     org_unit_key             = "ou_core"
     allow_console            = 1
     verification_relation_id = ""
     account_type             = "operation"
     tags = [
-      { key = "CostCenter", value = "OPS-001" },
+      { key = "CostCenter", value = "OPS-C01" },
     ]
   },
   {
-    account_name             = "example-security"
-    show_name                = "example-security"
+    account_name             = "ci-t20261014c-sec"
+    show_name                = "ci-t20261014c-sec"
     description              = "安全审计账号"
     org_unit_key             = "ou_core"
     allow_console            = 1
     verification_relation_id = ""
     account_type             = "security"
     tags = [
-      { key = "CostCenter", value = "SEC-001" },
+      { key = "CostCenter", value = "SEC-C01" },
     ]
   },
   {
-    account_name             = "example-logging"
-    show_name                = "example-logging"
+    account_name             = "ci-t20261014c-log"
+    show_name                = "ci-t20261014c-log"
     description              = "日志归集账号"
     org_unit_key             = "ou_core"
     allow_console            = 1
     verification_relation_id = ""
     account_type             = "logging"
     tags = [
-      { key = "CostCenter", value = "LOG-001" },
+      { key = "CostCenter", value = "LOG-C01" },
     ]
   },
   {
-    account_name             = "example-production"
-    show_name                = "example-production"
+    account_name             = "ci-t20261014c-prod"
+    show_name                = "ci-t20261014c-prod"
     description              = "生产业务账号"
     org_unit_key             = "ou_production"
     allow_console            = 1
     verification_relation_id = ""
     account_type             = "production"
     tags = [
-      { key = "CostCenter", value = "PROD-001" },
+      { key = "CostCenter", value = "PROD-C01" },
     ]
   },
   {
-    account_name             = "example-staging"
-    show_name                = "example-staging"
+    account_name             = "ci-t20261014c-stg"
+    show_name                = "ci-t20261014c-stg"
     description              = "预发测试账号"
     org_unit_key             = "ou_workloads"
     allow_console            = 1
     verification_relation_id = ""
     account_type             = "staging"
     tags = [
-      { key = "CostCenter", value = "STG-001" },
+      { key = "CostCenter", value = "STG-C01" },
     ]
   },
 ]
 
 existing_organization_account_ids = {
-  existing-operation  = ""
-  existing-security   = ""
-  existing-logging    = ""
-  existing-production = ""
-  existing-staging    = ""
+  ci-t20261010a-ops = "2132837596"
 }
 
 cloud_identity_users = [
   {
     key                     = "platform_admin"
-    user_name               = "exampleAdmin01"
-    display_name            = "Example Platform Admin"
+    user_name               = "ciAdmin20261014C"
+    display_name            = "CI Platform Admin C"
     description             = "平台管理员"
-    email                   = "platform-admin@example.com"
+    email                   = ""
     phone                   = ""
     password_reset_required = true
   },
   {
     key                     = "auditor"
-    user_name               = "exampleAuditor01"
-    display_name            = "Example Security Auditor"
+    user_name               = "ciAuditor20261014C"
+    display_name            = "CI Security Auditor C"
     description             = "安全审计员"
-    email                   = "security-auditor@example.com"
+    email                   = ""
     phone                   = ""
     password_reset_required = true
   },
@@ -128,16 +124,16 @@ cloud_identity_user_passwords = {
 cloud_identity_groups = [
   {
     key          = "grp_platform_admin"
-    group_name   = "ExampleAdmins01"
-    display_name = "Example Platform Admins"
+    group_name   = "CIAdmins20261014C"
+    display_name = "CI Platform Admins C"
     description  = "平台管理员组"
     join_type    = "Manual"
     member_keys  = ["platform_admin"]
   },
   {
     key          = "grp_security_audit"
-    group_name   = "ExampleAuditors01"
-    display_name = "Example Security Auditors"
+    group_name   = "CIAuditors20261014C"
+    display_name = "CI Security Auditors C"
     description  = "安全审计组"
     join_type    = "Manual"
     member_keys  = ["auditor"]
@@ -147,7 +143,7 @@ cloud_identity_groups = [
 permission_sets = [
   {
     key              = "ps_admin"
-    name             = "ExamplePlatformAdmin"
+    name             = "CIPlatformAdmin20261014C"
     description      = "平台管理权限"
     session_duration = 3600
     relay_state      = "https://console.volcengine.com/"
@@ -161,7 +157,7 @@ permission_sets = [
   },
   {
     key              = "ps_readonly"
-    name             = "ExampleSecurityRead"
+    name             = "CISecurityRead20261014C"
     description      = "安全审计只读权限"
     session_duration = 7200
     relay_state      = "https://console.volcengine.com/"
@@ -177,31 +173,31 @@ permission_sets = [
 
 # 同时配置新建账号和已有账号授权。
 # 预期：
-#   exampleAdmin01 可见 example-operation + existing-operation（管理员）
-#   exampleAuditor01 可见 example-production + existing-production（只读）
+#   ciAdmin20261014C 可见 ci-t20261014c-ops + ci-t20261010a-ops（管理员）
+#   ciAuditor20261014C 可见 ci-t20261014c-prod + ci-t20261010a-ops（只读）
 permission_set_assignments = [
   {
     permission_set_key = "ps_admin"
     principal_type     = "Group"
     principal_key      = "grp_platform_admin"
-    target_account_key = "example-operation"
+    target_account_key = "ci-t20261014c-ops"
   },
   {
     permission_set_key = "ps_readonly"
     principal_type     = "Group"
     principal_key      = "grp_security_audit"
-    target_account_key = "example-production"
+    target_account_key = "ci-t20261014c-prod"
   },
   {
     permission_set_key = "ps_admin"
     principal_type     = "Group"
     principal_key      = "grp_platform_admin"
-    target_account_key = "existing-operation"
+    target_account_key = "ci-t20261010a-ops"
   },
   {
     permission_set_key = "ps_readonly"
     principal_type     = "Group"
     principal_key      = "grp_security_audit"
-    target_account_key = "existing-production"
+    target_account_key = "ci-t20261010a-ops"
   },
 ]
