@@ -247,7 +247,15 @@ Run `terraform plan -parallelism=1` again with the same inputs; expect no unexpe
 
 #### 4.2.4 Post-deployment Verification
 
-First run `terraform output` to obtain actual resource, account and assignment IDs from the local deployment. Then complete the console relationship, group membership, permission provisioning and employee-portal checks under [Verify the Deployment](#414-verify-the-deployment). Use the relevant employee identity rather than the deployment administrator for portal checks. Use separate sessions for the administrator and auditor to avoid account-switching effects. Resolve failed provisioning tasks first. After policy changes, recheck and reprovision when required; Apply success alone does not prove that target-account permissions have been updated.
+After deployment, customers complete the following business checks in the relevant product consoles:
+
+| Location | Check | Expected result |
+| --- | --- | --- |
+| Organization | Inspect OUs and member accounts | The OU hierarchy matches the inputs; new accounts are in their target OUs; existing accounts retain their original OU and account information |
+| Cloud Identity | Inspect users, groups, permission sets and account assignments | Group membership, permission-set policies and target accounts match the template inputs |
+| User portal | Sign in separately as the administrator and auditor | Users see and enter authorized accounts; the administrator has management permissions, the auditor is read-only, and unauthorized accounts are not visible |
+
+If a check fails, review Cloud Identity assignments and provisioning tasks first. Confirm that the account belongs to the organization and that group members and assignment targets are correct before reprovisioning or adjusting the configuration.
 
 #### 4.2.5 Destroy Resources
 
@@ -267,4 +275,4 @@ Manual cleanup creates differences between cloud resources and Terraform State o
 
 This template centralizes permissions for newly-created and existing member accounts through a unified organization, identity, permission-set and assignment configuration. Customers can adjust accounts, groups and assignments for their business scale, then verify employee access and permission boundaries after deployment.
 
-Execution parallelism must remain 1. Member-account cleanup requires interactive console steps and cannot be completed through `terraform destroy`. This guide describes procedures and expected results derived from current code; historical deployment or test records are not presented as proof that this version has passed live acceptance.
+Deployment must use parallelism 1. After deployment, verify the organization structure, groups, permission sets, account assignments and user access described in this guide. When cleanup is required, handle member accounts through the console workflow instead of running a complete `terraform destroy`.

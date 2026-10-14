@@ -6,7 +6,7 @@
 # 设计要点：
 #   - permission_policies 是 SetNestedAttribute，必须完整定义所有字段（包括 Inline 留空字符串）
 #   - session_duration 单位为秒，建议 3600 或更长以适配长会话场景
-#   - 权限集创建后，通过 access 模块先下发再授权；策略更新后需确认目标账号同步状态
+#   - 权限集创建后，通过 access 模块先授权再同步；策略更新后需确认目标账号同步状态
 # ==============================================================================
 resource "volcenginecc_cloudidentity_permission_set" "this" {
   name             = var.name
