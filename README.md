@@ -15,56 +15,22 @@ This template provides centralized identity and access management across enterpr
 `organization` creates OUs and new accounts; `identity` creates users and groups; `permission-set` defines permissions; `access` merges newly-created account outputs with existing account IDs, waits 180 seconds after account creation, creates assignments, then provisions permission sets. Existing accounts are authorization targets only; their OU, tags and lifecycle are not managed.
 
 ~~~mermaid
-flowchart LR
+flowchart TB
     classDef main fill:#EAF4FF,stroke:#5B8FF9,color:#0D47A1;
     classDef tcc fill:#DFF2FF,stroke:#409EFF,color:#0D47A1;
-    classDef note fill:#FFFDE7,stroke:#FBC02D,color:#5D4037;
 
     Vars[/"terraform.tfvars<br/>OUs / new and existing accounts / users / groups<br/>Permission-set / assignment declarations"/]:::tcc
-    EXISTING[/"existing_organization_account_ids<br/>Member account IDs already in the organization<br/>References only; no account creation"/]:::tcc
+    ORG["organization module<br/>Create OUs and new member accounts<br/>Place accounts by org_unit_key"]:::main
+    IDS["Resolve account IDs<br/>New-account outputs + existing_organization_account_ids<br/>Existing accounts are references only"]:::tcc
+    READY["Prepare assignment prerequisites<br/>Create users, groups and permission sets<br/>Wait 180 seconds for account propagation"]:::main
+    ASN["permission_set_assignment<br/>Bind principals, permission sets and target accounts"]:::main
+    PROV["permission_set_provisioning<br/>Initially deploy permission sets to target accounts"]:::main
 
-    subgraph Org["Organization layer"]
-        direction TB
-        OU["organization_unit<br/>Organization units"]:::main
-        ACC["organization_account<br/>New member accounts"]:::main
-        OU --> ACC
-    end
-
-    subgraph Identity["Cloud Identity layer"]
-        direction TB
-        USER["cloudidentity_user<br/>Cloud Identity users"]:::main
-        GRP["cloudidentity_group<br/>Cloud Identity groups"]:::main
-        PS["cloudidentity_permission_set<br/>Access permission sets"]:::main
-        USER -.->|Membership| GRP
-    end
-
-    subgraph Assign["Assignment layer"]
-        direction TB
-        WAIT["time_sleep<br/>Wait 180 seconds after account IDs are available"]:::tcc
-        ASN["permission_set_assignment<br/>Access assignments"]:::main
-        PROV["permission_set_provisioning<br/>Permission-set provisioning"]:::main
-        WAIT --> ASN --> PROV
-    end
-
-    Vars --> Org
-    Vars --> Identity
-    Vars --> Assign
-    Vars --> EXISTING
-    GRP --> ASN
-    USER --> ASN
-    PS --> ASN
-    ACC --> WAIT
-    EXISTING --> WAIT
-
-    NoteOU["OU notes<br/>- Core and Workloads are children of root_parent_id<br/>- Production is a child of Workloads<br/>- The current template uses this fixed topology"]:::note
-    NoteACC["Member account notes<br/>- New names are unique and must not match existing keys<br/>- Empty verification_relation_id becomes null and is omitted<br/>- Merge common_tags and the AccountType tag"]:::note
-    NotePS["Permission-set notes<br/>- Supports mixed System + Inline policies<br/>- session_duration: 3600–43200 seconds"]:::note
-    NoteASN["Assignment notes<br/>- principal: User or Group<br/>- depends_on ensures assignment before provisioning<br/>- Deduplicate by permission set and target account"]:::note
-
-    OU -.-> NoteOU
-    ACC -.-> NoteACC
-    PS -.-> NotePS
-    PROV -.-> NoteASN
+    Vars --> ORG
+    ORG --> IDS
+    IDS --> READY
+    READY --> ASN
+    ASN --> PROV
 ~~~
 
 Core and Workloads are children of the organization root; Production is a child of Workloads. Resource references establish dependencies.
@@ -79,7 +45,7 @@ The initial assignment establishes the account, principal and permission-set rel
 
 ### 3.1 Resource Inventory
 
-After completing the current `terraform.tfvars` example inputs, the configuration is expected to create seven cloud resource types and 22 cloud instances, and reference five existing member accounts. Counts change with the account, identity and assignment configuration. The example counts are:
+After completing the current `terraform.tfvars` example inputs, the configuration is expected to create seven cloud resource types and 22 cloud instances, and reference one existing member account. Counts change with the account, identity and assignment configuration. The example counts are:
 
 | Terraform Resource | Purpose |
 | --- | --- |
@@ -102,7 +68,7 @@ Assignment instance keys combine permission set, principal type, principal and a
 .
 ├── main.tf / variables.tf / locals.tf / outputs.tf
 ├── checks.tf
-├── providers.tf / versions.tf / .terraform.lock.hcl
+├── providers.tf / versions.tf
 ├── terraform.tfvars
 └── modules/
     ├── organization/
@@ -130,6 +96,21 @@ permission_set_assignments = [{
 
 This grants the audit group access to the production account using the read-only permission set. After assignment, the permission set is synchronized to the target account.
 
+### 3.4 Initial-deployment Boundary and Ongoing Permission Operations
+
+This template is intended for initial deployment: it creates permission sets, establishes user or group access to target accounts, and initially deploys permission sets to new and existing accounts. After initial deployment reaches `Provisioned`, perform ongoing permission operations in the **Cloud Identity console** rather than repeatedly modifying stack inputs and running Apply.
+
+1. **Modify permission-set policies**: Open the permission-set list or details in Cloud Identity, edit system policies, inline policies, session duration or related settings, and save.
+2. **Reprovision policies**: Open **Access Permission Sets** in Cloud Identity, hover over the permission set that requires synchronization, and click **Start synchronization**. When synchronization finishes, confirm that the target-account deployment status returns to `Provisioned`.
+3. **Add account access**: Open account access assignments, select the target account, user or group and permission set, then verify that the synchronization task succeeds.
+4. **Change the principal or target account**: Open account access assignments, assess the business impact, revoke the old assignment and create the new one. Verify that the old entry disappears and the new entry works.
+5. **Remove access**: Revoke the user or group assignment, wait for background tasks, and confirm that the account no longer appears in the user portal.
+6. **Change group membership**: Add or remove members in the group details, then sign in again as the affected employee to verify the resulting account and permission scope.
+
+Updating a permission set does not mean that the changed policy is immediately effective in every assigned account. When deployment status is `ReprovisionRequired`, follow the step above and click **Start synchronization** on the **Access Permission Sets** page. Do not delete provisioning resources, destroy the complete stack or repeatedly run Apply merely to trigger synchronization.
+
+Manual console changes can create differences between live permissions and stack records. Before updating the stack again, reconcile the parameters with the live configuration so that older inputs do not overwrite effective permission settings.
+
 ## 4. Usage
 
 This project supports cloud deployment through InfraManager or local deployment using the downloaded template. Cloud deployment is recommended: you do not need to prepare a Terraform runtime, and you can create and manage resources by entering parameters in the platform.
@@ -144,13 +125,13 @@ Use an authorized identity in the organization administrator account. Enable Org
 
 #### 4.1.2 Select the Template
 
-Upload the project as a custom template to the [InfraManager console](https://console.volcengine.com/iac), using the repository root as the entry point. Include the root Terraform files, `terraform.tfvars`, `.terraform.lock.hcl` and the complete `modules/` directory. Select Terraform 1.5.7. The template pins `volcenginecc` to 0.0.70 and `time` to 0.14.2; the runtime must support both providers.
+Upload the project as a custom template to the [InfraManager console](https://console.volcengine.com/iac), using the repository root as the entry point. Include the root Terraform files, `terraform.tfvars` and the complete `modules/` directory. Select Terraform 1.5.7. The template pins `volcenginecc` to 0.0.70 and `time` to 0.14.2 in `versions.tf`; the runtime must support both providers.
 
 #### 4.1.3 Create a Stack
 
 When creating the stack, fill in the template inputs and set **execution parallelism to 1**. For API-based creation, the execution parameter is `Parallelism = 1`; do not use the default parallelism. See [stack creation execution parameters](https://docs.volcengine.com/docs/infrastructure-management/CreateStack-Createaresourcestack?lang=zh). This is a runtime setting, not a business variable in `terraform.tfvars`. If the current entry point cannot set parallelism to 1, confirm the platform runtime settings first, or use the local deployment procedure below.
 
-`terraform.tfvars` is the delivered example, while `variables.tf` defines types, defaults and validation. Before deployment, fill in the currently empty `root_parent_id`, existing account IDs and initial user passwords, and replace example names and email addresses with the customer's configuration. Existing accounts must already belong to the current organization, and their IDs must be distinct numeric strings. Supply passwords through platform sensitive runtime parameters that override the empty example values; do not include passwords in the deliverable.
+`terraform.tfvars` is the delivered example, while `variables.tf` defines types, defaults and validation. Before deployment, replace the root OU ID, existing account IDs, resource names, email addresses and initial user passwords with the target environment's values. Do not deploy with the example batch names or example passwords. Existing accounts must already belong to the current organization, and their IDs must be distinct numeric strings. Passwords can be supplied through platform-sensitive parameters or `cloud_identity_user_passwords`; do not commit real passwords to the repository.
 
 | Input | Purpose |
 | --- | --- |
@@ -211,7 +192,7 @@ export VOLCENGINE_SECRET_KEY="<YOUR_SECRET_KEY>"
 
 Replace the example root OU ID, existing account IDs, resource names and email addresses with the customer's values. See [Create a Stack](#413-create-a-stack) for input descriptions. Do not deploy while account IDs remain empty.
 
-Provide initial user passwords through the `TF_VAR_cloud_identity_user_passwords` JSON map. First remove or comment out the entire `cloud_identity_user_passwords` assignment block in `terraform.tfvars`; otherwise the empty example values override the environment variable. Then set the actual passwords in the runtime environment:
+Initial user passwords can be entered directly in the `cloud_identity_user_passwords` block in `terraform.tfvars`. To supply them through the environment instead, first remove or comment out the entire assignment block with the same name, then set:
 
 ~~~bash
 export TF_VAR_cloud_identity_user_passwords='{"platform_admin":"<ADMIN_INITIAL_PASSWORD>","auditor":"<AUDITOR_INITIAL_PASSWORD>"}'
@@ -235,7 +216,7 @@ Review Plan first and confirm that it contains no unexpected deletions or accoun
 
 #### 4.2.3 Expected Deployment Results
 
-After completing the current example inputs, deployment is expected to create 22 cloud resources and one wait helper, totaling 23 managed instances, and reference five existing accounts. New accounts finish creation and return IDs before the 180-second wait starts. Assignments then target the configured new and existing accounts, and provisioning is deduplicated by permission set and account. Only some existing accounts have assignments; supplying an account ID alone does not grant permissions.
+After completing the current example inputs, deployment is expected to create 22 cloud resources and one wait helper, totaling 23 managed instances, and reference one existing account. New accounts finish creation and return IDs before the 180-second wait starts. Assignments then target the configured new and existing accounts, and provisioning is deduplicated by permission set and account. Supplying an existing account ID alone does not grant access; only relationships declared in `permission_set_assignments` create assignments.
 
 View outputs with the command below. Output names and purposes are listed under [Verify the Deployment](#414-verify-the-deployment):
 
@@ -252,7 +233,7 @@ After deployment, customers complete the following business checks in the releva
 | Location | Check | Expected result |
 | --- | --- | --- |
 | Organization | Inspect OUs and member accounts | The OU hierarchy matches the inputs; new accounts are in their target OUs; existing accounts retain their original OU and account information |
-| Cloud Identity | Inspect users, groups, permission sets and account assignments | Group membership, permission-set policies and target accounts match the template inputs |
+| Cloud Identity | Inspect users, groups, permission sets, account assignments and deployment status | Group membership, permission-set policies and target accounts match the template inputs; deployment status is `Provisioned`, and later changes follow [Initial-deployment Boundary and Ongoing Permission Operations](#34-initial-deployment-boundary-and-ongoing-permission-operations) |
 | User portal | Sign in separately as the administrator and auditor | Users see and enter authorized accounts; the administrator has management permissions, the auditor is read-only, and unauthorized accounts are not visible |
 
 If a check fails, review Cloud Identity assignments and provisioning tasks first. Confirm that the account belongs to the organization and that group members and assignment targets are correct before reprovisioning or adjusting the configuration.
