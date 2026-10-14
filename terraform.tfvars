@@ -117,8 +117,8 @@ cloud_identity_users = [
 # 部署前填写初始密码；密码须为 8–32 位并满足至少三类复杂度要求。
 # 不要提交包含真实密码的文件。
 cloud_identity_user_passwords = {
-  platform_admin = ""
-  auditor        = ""
+  platform_admin = "ReplaceMe@1234"
+  auditor        = "ReplaceMe@1234"
 }
 
 cloud_identity_groups = [
