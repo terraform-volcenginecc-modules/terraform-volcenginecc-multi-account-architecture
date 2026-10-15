@@ -1,0 +1,22 @@
+.env
+.DS_Store
+**/.DS_Store
+**/.terraform/*
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan
+**/terraform.tfvars
+**/deploy-*.log
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+.aiac/
+**/*.tfvars
+**/*.tfvars.json
+**/crash.*.log
+
+# The reviewed, non-sensitive template input is part of the deliverable.
+!terraform.tfvars
