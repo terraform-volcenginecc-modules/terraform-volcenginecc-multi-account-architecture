@@ -15,22 +15,56 @@ This template provides centralized identity and access management across enterpr
 `organization` creates OUs and new accounts; `identity` creates users and groups; `permission-set` defines permissions; `access` merges newly-created account outputs with existing account IDs, waits 180 seconds after account creation, creates assignments, then provisions permission sets. Existing accounts are authorization targets only; their OU, tags and lifecycle are not managed.
 
 ~~~mermaid
-flowchart TB
+flowchart LR
     classDef main fill:#EAF4FF,stroke:#5B8FF9,color:#0D47A1;
     classDef tcc fill:#DFF2FF,stroke:#409EFF,color:#0D47A1;
+    classDef note fill:#FFFDE7,stroke:#FBC02D,color:#5D4037;
 
     Vars[/"terraform.tfvars<br/>OUs / new and existing accounts / users / groups<br/>Permission-set / assignment declarations"/]:::tcc
-    ORG["organization module<br/>Create OUs and new member accounts<br/>Place accounts by org_unit_key"]:::main
-    IDS["Resolve account IDs<br/>New-account outputs + existing_organization_account_ids<br/>Existing accounts are references only"]:::tcc
-    READY["Prepare assignment prerequisites<br/>Create users, groups and permission sets<br/>Wait 180 seconds for account propagation"]:::main
-    ASN["permission_set_assignment<br/>Bind principals, permission sets and target accounts"]:::main
-    PROV["permission_set_provisioning<br/>Initially deploy permission sets to target accounts"]:::main
+    EXISTING[/"existing_organization_account_ids<br/>Member-account IDs already in the organization<br/>References only; no account creation"/]:::tcc
 
-    Vars --> ORG
-    ORG --> IDS
-    IDS --> READY
-    READY --> ASN
-    ASN --> PROV
+    subgraph Org["Organization layer"]
+        direction TB
+        OU["organization_unit<br/>Organization units"]:::main
+        ACC["organization_account<br/>New member accounts"]:::main
+        OU --> ACC
+    end
+
+    subgraph Identity["Cloud Identity layer"]
+        direction TB
+        USER["cloudidentity_user<br/>Cloud Identity users"]:::main
+        GRP["cloudidentity_group<br/>Cloud Identity groups"]:::main
+        PS["cloudidentity_permission_set<br/>Access permission sets"]:::main
+        USER -.->|Membership| GRP
+    end
+
+    subgraph Assign["Assignment layer"]
+        direction TB
+        WAIT["time_sleep<br/>Wait 180 seconds after account IDs are ready"]:::tcc
+        ASN["permission_set_assignment<br/>Access assignments"]:::main
+        PROV["permission_set_provisioning<br/>Permission-set provisioning"]:::main
+        WAIT --> ASN --> PROV
+    end
+
+    Vars --> Org
+    Vars --> Identity
+    Vars --> Assign
+    Vars --> EXISTING
+    GRP --> ASN
+    USER --> ASN
+    PS --> ASN
+    ACC --> WAIT
+    EXISTING --> WAIT
+
+    NoteOU["OU notes<br/>- Core and Workloads are children of root_parent_id<br/>- Production is a child of Workloads<br/>- The current template uses this fixed topology"]:::note
+    NoteACC["Member account notes<br/>- New names are unique and must not match existing keys<br/>- Empty verification_relation_id becomes null and is omitted<br/>- Merge common_tags and the AccountType tag"]:::note
+    NotePS["Permission-set notes<br/>- Supports mixed System + Inline policies<br/>- session_duration: 3600–43200 seconds"]:::note
+    NoteASN["Assignment notes<br/>- principal: User or Group<br/>- depends_on ensures assignment before provisioning<br/>- Deduplicate by permission set and target account"]:::note
+
+    OU -.-> NoteOU
+    ACC -.-> NoteACC
+    PS -.-> NotePS
+    PROV -.-> NoteASN
 ~~~
 
 Core and Workloads are children of the organization root; Production is a child of Workloads. Resource references establish dependencies.

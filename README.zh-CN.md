@@ -15,22 +15,56 @@
 `organization` 创建 OU 和新账号；`identity` 创建用户和用户组；`permission-set` 定义权限；`access` 合并新建账号输出与已有账号 ID，在账号创建完成后等待 180 秒，先创建访问授权，再同步权限集。已有账号仅参与授权，不管理其 OU、标签和生命周期。
 
 ```mermaid
-flowchart TB
+flowchart LR
     classDef main fill:#EAF4FF,stroke:#5B8FF9,color:#0D47A1;
     classDef tcc fill:#DFF2FF,stroke:#409EFF,color:#0D47A1;
+    classDef note fill:#FFFDE7,stroke:#FBC02D,color:#5D4037;
 
     Vars[/"terraform.tfvars<br/>OU / 新旧账号 / 用户 / 组<br/>权限集 / 授权声明"/]:::tcc
-    ORG["organization 模块<br/>创建 OU 和新成员账号<br/>按 org_unit_key 放入目标 OU"]:::main
-    IDS["账号 ID 汇总<br/>新建账号输出 + existing_organization_account_ids<br/>已有账号仅引用，不修改生命周期"]:::tcc
-    READY["授权前置就绪<br/>创建用户、用户组和权限集<br/>账号传播等待 180 秒"]:::main
-    ASN["permission_set_assignment<br/>建立主体、权限集与目标账号授权"]:::main
-    PROV["permission_set_provisioning<br/>向目标账号初次部署权限集"]:::main
+    EXISTING[/"existing_organization_account_ids<br/>已加入组织的成员账号 ID<br/>仅引用，不创建账号"/]:::tcc
 
-    Vars --> ORG
-    ORG --> IDS
-    IDS --> READY
-    READY --> ASN
-    ASN --> PROV
+    subgraph Org["组织层 Organization"]
+        direction TB
+        OU["organization_unit<br/>组织单元 OU"]:::main
+        ACC["organization_account<br/>新建成员账号"]:::main
+        OU --> ACC
+    end
+
+    subgraph Identity["身份层 Cloud Identity"]
+        direction TB
+        USER["cloudidentity_user<br/>云身份用户"]:::main
+        GRP["cloudidentity_group<br/>云身份用户组"]:::main
+        PS["cloudidentity_permission_set<br/>访问权限集"]:::main
+        USER -.->|成员关系| GRP
+    end
+
+    subgraph Assign["授权层 Assignment"]
+        direction TB
+        WAIT["time_sleep<br/>账号 ID 就绪后等待 180 秒"]:::tcc
+        ASN["permission_set_assignment<br/>访问授权"]:::main
+        PROV["permission_set_provisioning<br/>权限集部署"]:::main
+        WAIT --> ASN --> PROV
+    end
+
+    Vars --> Org
+    Vars --> Identity
+    Vars --> Assign
+    Vars --> EXISTING
+    GRP --> ASN
+    USER --> ASN
+    PS --> ASN
+    ACC --> WAIT
+    EXISTING --> WAIT
+
+    NoteOU["OU 要点<br/>- Core、Workloads 挂在 root_parent_id<br/>- Production 挂在 Workloads<br/>- 当前模板固定上述拓扑"]:::note
+    NoteACC["成员账号要点<br/>- 新建列表名称唯一，不与已有账号 key 同名<br/>- verification_relation_id 空值转 null 省略<br/>- 合并 common_tags 与 AccountType 标签"]:::note
+    NotePS["权限集要点<br/>- 支持 System + Inline 混合策略<br/>- session_duration 3600–43200 秒"]:::note
+    NoteASN["授权要点<br/>- principal: User 或 Group<br/>- depends_on 保证先授权、再部署权限集<br/>- 按权限集与目标账号组合去重部署"]:::note
+
+    OU -.-> NoteOU
+    ACC -.-> NoteACC
+    PS -.-> NotePS
+    PROV -.-> NoteASN
 ```
 
 Core 和 Workloads 挂在企业组织根节点下，Production 挂在 Workloads 下。通过资源引用建立执行依赖。
